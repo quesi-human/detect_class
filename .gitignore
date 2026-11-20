@@ -1,0 +1,33 @@
+# Python 및 편집기
+__pycache__/
+*.py[cod]
+.venv*/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.vscode/
+.idea/
+.DS_Store
+
+# 장치별 설정 및 자격 증명
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_ed25519*
+
+# 별도로 준비하는 모델·빌드 도구와 실행 결과
+/models/
+/tools/
+/logs/
+/recordings/
+/backups/
+*.bak
+*.log
+.lgd-nfy*

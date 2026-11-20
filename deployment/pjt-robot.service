@@ -1,0 +1,36 @@
+[Unit]
+Description=Robot Vision voice and camera tracking
+Wants=network-online.target
+After=network-online.target sound.target
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=@USER@
+Group=@USER@
+SupplementaryGroups=gpio spi audio video render
+WorkingDirectory=@ROOT@
+RuntimeDirectory=pjt-robot-vision
+RuntimeDirectoryMode=0750
+Environment=LC_ALL=C.UTF-8 PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/pjt-robot-vision.env
+ExecStartPre=+/usr/local/libexec/pjt-robot-hardware prepare
+ExecStart=@PYTHON@ -u -m robot_vision
+ExecStopPost=+/usr/local/libexec/pjt-robot-hardware release
+Restart=on-failure
+RestartSec=4
+TimeoutStartSec=180
+TimeoutStopSec=25
+KillMode=mixed
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pjt-robot
+LogRateLimitIntervalSec=30
+LogRateLimitBurst=300
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# 노트북에서 제한된 SSH 키로 라파 서비스를 관리한다.
+set -euo pipefail
+command=${1:-status}
+case "$command" in
+  start|stop|restart|status|logs) ;;
+  *) echo '사용법: robotctl {start|stop|restart|status|logs}' >&2; exit 2 ;;
+esac
+host=${ROBOT_HOST:-raspberrypi.local}
+robot_user=${ROBOT_USER:-$USER}
+key=${ROBOT_SSH_KEY:-$HOME/.ssh/id_ed25519_pjt_robot_vision}
+ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  -o ConnectTimeout=10 "$robot_user@$host" "$command"
+if [[ "$command" == start || "$command" == restart ]]; then
+  echo "영상: http://$host:8080/yolo.mjpg"
+fi

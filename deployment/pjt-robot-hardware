@@ -1,0 +1,94 @@
+#!/usr/bin/python3 -I
+"""서비스 시작 전 하드웨어 준비와 종료 후 PWM 해제."""
+
+import fcntl
+import grp
+import os
+import pwd
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+PWM = Path("/sys/class/pwm/pwmchip0/pwm0")
+PWMS = (PWM, PWM.parent / "pwm1")
+MARKER = Path("/run/pjt-robot-vision-pwm-owned")
+LOCK = Path("/run/lock/pjt-robot-vision-servo.lock")
+
+
+def capture_list():
+    return subprocess.check_output(
+        ["/usr/bin/arecord", "-l"], text=True, env=dict(os.environ, LC_ALL="C.UTF-8")
+    )
+
+
+def prepare():
+    if not Path("/dev/spidev0.0").exists():
+        subprocess.run(["/usr/bin/dtparam", "spi=on"], check=True)
+    if "SPH0645" not in capture_list():
+        subprocess.run(["/usr/bin/dtoverlay", "adau7002-simple", "card-name=SPH0645"], check=True)
+    deadline = time.monotonic() + 5
+    while "SPH0645" not in capture_list() and time.monotonic() < deadline:
+        time.sleep(0.2)
+    if "SPH0645" not in capture_list():
+        raise RuntimeError("SPH0645 캡처 카드가 없습니다.")
+    if not PWM.parent.exists():
+        raise RuntimeError("하드웨어 PWM 설정이 없습니다. 부팅 설정을 확인하세요.")
+    # 기존 서비스와 충돌하지 않는 정지 상태에서만 두 출력 핀을 설정한다.
+    for output in PWMS:
+        if output.exists() and (output / "enable").read_text().strip() == "1":
+            raise RuntimeError("PWM이 이미 사용 중입니다. 먼저 종료하세요.")
+    for pin in ("12", "13"):
+        subprocess.run(["/usr/bin/pinctrl", "set", pin, "a0"], check=True)
+    user = pwd.getpwnam("@USER@")
+    gpio_gid = grp.getgrnam("gpio").gr_gid
+    # /run/lock은 sticky 디렉터리다. 기존 사용자 소유 파일에 O_CREAT를
+    # 다시 사용하면 fs.protected_regular 때문에 root도 거절될 수 있다.
+    flags = os.O_RDWR | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(LOCK, flags | os.O_CREAT | os.O_EXCL, 0o660)
+    except FileExistsError:
+        descriptor = os.open(LOCK, flags)
+    with os.fdopen(descriptor, "r+") as lock:
+        if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+            raise RuntimeError("모터 잠금 경로가 일반 파일이 아닙니다.")
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for channel, output in enumerate(PWMS):
+            if not output.exists():
+                (PWM.parent / "export").write_text(str(channel))
+                deadline = time.monotonic() + 2
+                while not output.exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+            if (output / "enable").read_text().strip() == "1":
+                raise RuntimeError("다른 프로그램의 PWM이 실행 중입니다.")
+            for name in ("period", "duty_cycle", "enable", "polarity"):
+                os.chown(output / name, user.pw_uid, gpio_gid)
+                os.chmod(output / name, 0o660)
+        os.chown(LOCK, user.pw_uid, user.pw_gid)
+        os.chmod(LOCK, 0o660)
+        MARKER.write_text("pjt-robot.service\n")
+    print("SPI·I2S·PWM 준비 완료. 모터 회전 명령 없음.", flush=True)
+
+
+def release():
+    if not MARKER.exists():
+        return
+    try:
+        for output in PWMS:
+            if output.exists():
+                try:
+                    (output / "duty_cycle").write_text("0")
+                finally:
+                    (output / "enable").write_text("0")
+    finally:
+        MARKER.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2 or sys.argv[1] not in {"prepare", "release"}:
+        raise SystemExit("사용법: pjt-robot-hardware prepare|release")
+    if os.geteuid() != 0:
+        raise SystemExit("root 권한이 필요합니다.")
+    (prepare if sys.argv[1] == "prepare" else release)()

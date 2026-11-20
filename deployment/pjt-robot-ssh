@@ -1,0 +1,11 @@
+#!/bin/sh
+# 이 전용 SSH 키는 일반 셸이 아닌 서비스 관리에만 사용한다.
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  start|stop|restart|status|logs)
+    exec /usr/bin/sudo -n /usr/local/sbin/pjt-robot-control "$SSH_ORIGINAL_COMMAND"
+    ;;
+  *)
+    echo '허용 명령: start, stop, restart, status, logs' >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,65 @@
+#!/usr/bin/python3 -I
+"""전용 SSH 키에 허용할 서비스 관리 명령만 실행한다."""
+
+import subprocess
+import sys
+
+
+SERVICE = "pjt-robot.service"
+ACTIONS = {"start", "stop", "restart", "status", "logs"}
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in ACTIONS:
+        print("허용 명령: start, stop, restart, status, logs", file=sys.stderr)
+        return 2
+    action = sys.argv[1]
+    if action == "logs":
+        return subprocess.call(
+            ["/usr/bin/journalctl", "-u", SERVICE, "-n", "80", "--no-pager", "-o", "short"]
+        )
+    if action in {"start", "stop", "restart"}:
+        print(f"라파 서비스 {action} 요청…", flush=True)
+        if action in {"start", "restart"}:
+            # 부팅 후 아직 로드되지 않은 정상 유닛은 reset-failed가 실패할 수 있다.
+            # 실제 start/restart 결과로 성공 여부를 판단한다.
+            subprocess.run(
+                ["/usr/bin/systemctl", "reset-failed", SERVICE],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        result = subprocess.run(["/usr/bin/systemctl", action, SERVICE])
+        if result.returncode != 0:
+            subprocess.run(["/usr/bin/journalctl", "-u", SERVICE, "-n", "30", "--no-pager"])
+            return result.returncode
+    output = subprocess.check_output(
+        [
+            "/usr/bin/systemctl",
+            "show",
+            SERVICE,
+            "-p",
+            "ActiveState",
+            "-p",
+            "SubState",
+            "-p",
+            "MainPID",
+            "-p",
+            "StatusText",
+        ],
+        text=True,
+    )
+    properties = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+    print("서비스:", properties.get("ActiveState"), "/", properties.get("SubState"))
+    print("관리 PID:", properties.get("MainPID"))
+    if properties.get("ActiveState") in {"active", "activating"}:
+        print("상태:", properties.get("StatusText", ""))
+    if action in {"start", "restart"}:
+        print("\n준비 완료. 버튼을 한 번 누르고 명령을 말하세요.")
+        addresses = subprocess.check_output(["/usr/bin/hostname", "-I"], text=True).split()
+        host = next((value for value in addresses if "." in value), "raspberrypi.local")
+        print(f"영상: http://{host}:8080/yolo.mjpg")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
